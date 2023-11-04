@@ -1,0 +1,4 @@
+Started Wed Sep  6 22:20:42 2023
+muscle -spscore sepp_mod-code/sepp/output_alignment.fasta -log sepp_mod-code/sepp/output_alignment_sp_score.txt 
+File=sepp_mod-code/sepp/output_alignment.fasta;SP=180.6
+Finished Wed Sep  6 22:20:44 2023
