@@ -18,6 +18,7 @@ from sepp.math_utils import lcm
 import copy
 import random 
 import time
+import numpy as np
 _LOG = get_logger(__name__)
 
 
@@ -31,200 +32,260 @@ class QuerySetJob(Job):
         self.fc = fc
         self.qseqs = None
         self.query_seqs = None
-        self.set_to_kmers = None
-        self.K = None
         self.kmers_to_check = None
         self.set_to_seqs = None
         self.top_sets_to_check = None
         self.rounds = None
         self.int_score = None
-    def setup_problem(self, qseqs, query_seqs, set_to_seqs, set_to_kmers, set_to_num_kmers, K, kmers_to_check, top_sets_to_check, rounds, int_score, exact):
+        
+        self.qseq_to_K = None
+        self.K_to_set_kmers = None
+        self.K_to_set_num_kmers = None
+        
+    def setup_problem(self, qseqs, query_seqs, qseq_to_K, K_to_set_kmers, K_to_set_num_kmers, set_to_seqs, use_fraction_batch, batch_size_fraction, min_batch_size, kmers_to_check, top_sets_to_check, rounds, int_score, exact):
         self.qseqs = qseqs    
         self.query_seqs = query_seqs
-        self.set_to_kmers = set_to_kmers
-        self.set_to_num_kmers = set_to_num_kmers
-        self.K = K
-        self.kmers_to_check = kmers_to_check
+        self.qseq_to_K = qseq_to_K
+        self.K_to_set_kmers = K_to_set_kmers
+        self.K_to_set_num_kmers = K_to_set_num_kmers
         self.set_to_seqs = set_to_seqs
+        self.use_fraction_batch = use_fraction_batch 
+        self.batch_size_fraction = batch_size_fraction 
+        self.min_batch_size = min_batch_size
+        self.kmers_to_check = kmers_to_check
         self.top_sets_to_check = top_sets_to_check   
         self.rounds = rounds
         self.int_score = int_score
-        self.exact = exact
+        self.exact = exact   
+
     def run(self):
         qseqs = self.qseqs
-        K = self.K
         query_seqs = self.query_seqs
+        set_to_seqs = self.set_to_seqs
         kmers_to_check = self.kmers_to_check
-        set_to_kmers = self.set_to_kmers
-        set_to_num_kmers = self.set_to_num_kmers 
         set_to_seqs = self.set_to_seqs
         top_sets_to_check = self.top_sets_to_check
         rounds = self.rounds
         int_score = self.int_score
         exact = self.exact
-        num_sets = len(set_to_kmers)
+        
+        qseq_to_K = self.qseq_to_K
+        K_to_set_kmers = self.K_to_set_kmers 
+        K_to_set_num_kmers = self.K_to_set_num_kmers 
+        
+        
+        qseq_too_short = {}        
+
+        
+        num_sets = len(K_to_set_kmers[list(K_to_set_kmers.keys())[0]])
         qseq_to_kmers = {}
-        for qseq in qseqs:
-            qseq_to_kmers[qseq] = {}
-            for i in range(0, len(query_seqs[qseq]) - K + 1):
-                kmer = query_seqs[qseq][i:i+K] 
-                if kmer in qseq_to_kmers[qseq]:
-                    qseq_to_kmers[qseq][kmer] += 1
+        if len(qseq_to_K) == 0:
+            K = list(K_to_set_kmers.keys())[0]
+            for qseq in qseqs:
+                if len(query_seqs[qseq]) < K:
+                    qseq_too_short[qseq] = True
+                    continue
                 else:
-                    qseq_to_kmers[qseq][kmer] = 1               
+                    qseq_to_kmers[qseq] = {}
+                    for i in range(0, len(query_seqs[qseq]) - K + 1):
+                        kmer = query_seqs[qseq][i:i+K] 
+                        if kmer in qseq_to_kmers[qseq]:
+                            qseq_to_kmers[qseq][kmer] += 1
+                        else:
+                            qseq_to_kmers[qseq][kmer] = 1   
+        else:
+            for qseq in qseqs:
+                if len(query_seqs[qseq]) < K:
+                    qseq_too_short[qseq] = True
+                else:            
+                    qseq_to_kmers[qseq] = {}
+                    K = qseq_to_K[qseq]
+                    for i in range(0, len(query_seqs[qseq]) - K + 1):
+                        kmer = query_seqs[qseq][i:i+K] 
+                        if kmer in qseq_to_kmers[qseq]:
+                            qseq_to_kmers[qseq][kmer] += 1
+                        else:
+                            qseq_to_kmers[qseq][kmer] = 1               
         
 
         
-        
+        #print(K_to_set_num_kmers)
+        #print(qseq_to_K)
         query_set_comparison = {}
         #print(qseq)
         #query_set_comparison_data[qseq] = {}
-        
+        #print("num_sets: ", num_sets)
 
+        K = list(K_to_set_kmers.keys())[0]
         for qseq in qseq_to_kmers:
-            if not exact:
-                cands = {}
-                for set_num in range(num_sets):
-                    cands[set_num]  = 0
-                
-                qseq_cands = {}
-                cands_sorted = {}
-                #qseq_to_kmers_sorted = sorted(qseq_to_kmers[qseq].items(), key = lambda kv: kv[1], reverse=True)
-                num_kmers_in_q = len(qseq_to_kmers[qseq])
-    
-                for rnd in range(rounds):
-                    #print(qseq, len(cands), top_sets_to_check)
-                    if len(cands) > top_sets_to_check:
-                        
-                        # sample without replacement
-                        kmers_to_check2 = min(kmers_to_check, len(qseq_to_kmers[qseq]))
-                        qseq_to_kmers_sample = random.sample(qseq_to_kmers[qseq].keys(), kmers_to_check2)
-                        
-                        # sample with replacement
-                        #kmers_to_check2 = kmers_to_check
-                        #qseq_to_kmers_sample = random.choices([i for i in range(len(query_seqs[qseq]) - K + 1)], k = kmers_to_check2)
-                        for set_num in cands:
-                            intersection1 = 0
-                            for i1 in range(kmers_to_check2):
-                                #kmer1 = query_seqs[qseq][qseq_to_kmers_sample[i1]: qseq_to_kmers_sample[i1] + K]
-                                kmer1 = qseq_to_kmers_sample[i1]
-                                if kmer1 in set_to_kmers[set_num]:
-                                    intersection1 += min(set_to_kmers[set_num][kmer1] / len(set_to_seqs[set_num]), qseq_to_kmers[qseq][kmer1]) 
-                            if int_score: 
-                                cands[set_num] += intersection1 * (num_kmers_in_q / kmers_to_check2)
-                            else:
-                                cands[set_num] += intersection1 * (num_kmers_in_q / kmers_to_check2)  /  ((len(query_seqs[qseq]) - K + 1)  + set_to_num_kmers[set_num]/ len(set_to_seqs[set_num]))
-                                #print(qseq, set_num, (len(query_seqs[qseq]) - K + 1), set_to_num_kmers[set_num], len(set_to_seqs[set_num]),  (len(query_seqs[qseq]) - K + 1) / kmers_to_check2,  ((len(query_seqs[qseq]) - K + 1)  + set_to_num_kmers[set_num]/ len(set_to_seqs[set_num])), ((len(query_seqs[qseq]) - K + 1) / kmers_to_check2)  /  ((len(query_seqs[qseq]) - K + 1)  + set_to_num_kmers[set_num]/ len(set_to_seqs[set_num])))
-                        cands_sorted = sorted(cands.items(), key = lambda kv: kv[1], reverse=True)   
-                        new_cands = {}
-                        for i1 in range(max(int(len(cands_sorted)/2), top_sets_to_check)):
-                            new_cands[cands_sorted[i1][0]] = cands_sorted[i1][1]
-                        #print(qseq, rnd, cands)
-                        #print(" ")
-                        cands = new_cands
+            if len(qseq_to_K) != 0:
             
-                # for rnd in range(rounds):
-                #     if len(cands) > top_sets_to_check:
-                #         kmers_to_check2 = min(kmers_to_check, len(qseq_to_kmers[qseq]))
-                #         qseq_to_kmers_sample = random.sample(qseq_to_kmers[qseq].keys(), kmers_to_check2)
-                #         for set_num in cands:
-                #             intersection1 = 0
-                #             for i1 in range(kmers_to_check2):
-                #                 #kmer1 = qseq_to_kmers_sorted[i1][0]
-                #                 kmer1 = qseq_to_kmers_sample[i1]
-                #                 if kmer1 in set_to_kmers[set_num]:
-                #                     intersection1 += min(set_to_kmers[set_num][kmer1] / len(set_to_seqs[set_num]), qseq_to_kmers[qseq][kmer1])
-                #             cands[set_num] += intersection1
-                #         cands_sorted = sorted(cands.items(), key = lambda kv: kv[1], reverse=True)   
-                #         new_cands = {}
-                #         for i1 in range(max(int(len(cands_sorted)/2), top_sets_to_check)):
-                #             new_cands[cands_sorted[i1][0]] = cands_sorted[i1][1]
-                #         cands = new_cands
-                        
-                    
-                qseq_cands[qseq] = cands_sorted    
-                #print(cands_sorted)            
-                
-                query_set_comparison[qseq] = {}
-                #for set_num in range(num_sets):
-                for ts in range(top_sets_to_check):  
-                    set_num = qseq_cands[qseq][ts][0]  
-                    
-                    intersection = {}
-                    qseq_minus_set = {}
-                    set_minus_qseq = {}
-                    total_in_qseq = 0
-                    
-                    total_in_set = 0
-                    for kmer in set(set_to_kmers[set_num].keys()).union(set(qseq_to_kmers[qseq].keys())):
-                        if kmer in set_to_kmers[set_num] and kmer in qseq_to_kmers[qseq]:
-                            s_norm = set_to_kmers[set_num][kmer]/len(set_to_seqs[set_num])
-                            q_norm = qseq_to_kmers[qseq][kmer]
-                            intersection[kmer] = min(s_norm, q_norm)
-                            if s_norm > q_norm:
-                                set_minus_qseq[kmer] = s_norm - q_norm
-                            elif q_norm > s_norm:
-                                qseq_minus_set[kmer] = q_norm - s_norm
-                            total_in_qseq += q_norm
-                            total_in_set += s_norm
-                        
-                        elif kmer in set_to_kmers[set_num]:
-                            s_norm = set_to_kmers[set_num][kmer]/len(set_to_seqs[set_num])
-                            set_minus_qseq[kmer] = s_norm 
-                            total_in_set += s_norm
-                            
-                        elif kmer in qseq_to_kmers[qseq]:
-                            q_norm = qseq_to_kmers[qseq][kmer]
-                            qseq_minus_set[kmer] = q_norm
-                            total_in_qseq += q_norm
-                                
-                    total_in_union = total_in_qseq + total_in_set
-                    total_in_intersection =  sum([intersection[kmer] for kmer in intersection])
-                    
-                    #query_set_comparison_data[qseq][set_num] = [intersection, qseq_minus_set, set_minus_qseq] 
-                    
-                    query_set_comparison[qseq][set_num] = [total_in_union, total_in_intersection, total_in_intersection/total_in_union]
-           
+                K = qseq_to_K[qseq]
             
-            else:
-                query_set_comparison[qseq] = {}
-                
+            
+            if qseq in qseq_too_short:
+                query_set_comparison[qseq] = {}    
                 for set_num in range(num_sets):
+                    # the first entry of this vector should not be 0, but it doesn't matter because it's not used anyway.
+                    query_set_comparison[qseq][set_num] = [0, 0, 0]
+                
+            else:    
+                set_to_kmers = K_to_set_kmers[K]
+                set_to_num_kmers = K_to_set_num_kmers[K]
+                
+                if self.use_fraction_batch:
+                    kmers_to_check = max(self.min_batch_size, int(np.ceil(self.batch_size_fraction*len(query_seqs[qseq]))))
+                    #print(len(query_seqs[qseq]), kmers_to_check)
+                
+                #print(qseq)
+                #print(K)
+                #print(" ")
+                #print(set_to_kmers)
+                #print(" ")
+                #print(qseq_to_kmers[qseq])
+                if (not exact) and (num_sets > top_sets_to_check):
+                    cands = {}
+                    for set_num in range(num_sets):
+                        cands[set_num]  = 0
                     
-                    intersection = {}
-                    qseq_minus_set = {}
-                    set_minus_qseq = {}
-                    total_in_qseq = 0
+                    qseq_cands = {}
+                    cands_sorted = {}
+                    #qseq_to_kmers_sorted = sorted(qseq_to_kmers[qseq].items(), key = lambda kv: kv[1], reverse=True)
+                    num_kmers_in_q = len(qseq_to_kmers[qseq])
                     
-                    total_in_set = 0
-                    for kmer in set(set_to_kmers[set_num].keys()).union(set(qseq_to_kmers[qseq].keys())):
-                        if kmer in set_to_kmers[set_num] and kmer in qseq_to_kmers[qseq]:
-                            s_norm = set_to_kmers[set_num][kmer]/len(set_to_seqs[set_num])
-                            q_norm = qseq_to_kmers[qseq][kmer]
-                            intersection[kmer] = min(s_norm, q_norm)
-                            if s_norm > q_norm:
-                                set_minus_qseq[kmer] = s_norm - q_norm
-                            elif q_norm > s_norm:
-                                qseq_minus_set[kmer] = q_norm - s_norm
-                            total_in_qseq += q_norm
-                            total_in_set += s_norm
-                        
-                        elif kmer in set_to_kmers[set_num]:
-                            s_norm = set_to_kmers[set_num][kmer]/len(set_to_seqs[set_num])
-                            set_minus_qseq[kmer] = s_norm 
-                            total_in_set += s_norm
+                    for rnd in range(rounds):
+                        #print(qseq, len(cands), top_sets_to_check)
+                        if len(cands) > top_sets_to_check:
                             
-                        elif kmer in qseq_to_kmers[qseq]:
-                            q_norm = qseq_to_kmers[qseq][kmer]
-                            qseq_minus_set[kmer] = q_norm
-                            total_in_qseq += q_norm
+                            # sample without replacement
+                            kmers_to_check2 = min(kmers_to_check, len(qseq_to_kmers[qseq]))
+                            qseq_to_kmers_sample = random.sample(qseq_to_kmers[qseq].keys(), kmers_to_check2)
+                            
+                            # sample with replacement
+                            #kmers_to_check2 = kmers_to_check
+                            #qseq_to_kmers_sample = random.choices([i for i in range(len(query_seqs[qseq]) - K + 1)], k = kmers_to_check2)
+                            for set_num in cands:
+                                intersection1 = 0
+                                for i1 in range(kmers_to_check2):
+                                    #kmer1 = query_seqs[qseq][qseq_to_kmers_sample[i1]: qseq_to_kmers_sample[i1] + K]
+                                    kmer1 = qseq_to_kmers_sample[i1]
+                                    if kmer1 in set_to_kmers[set_num]:
+                                        intersection1 += min(set_to_kmers[set_num][kmer1] / len(set_to_seqs[set_num]), qseq_to_kmers[qseq][kmer1]) 
+                                if int_score: 
+                                    cands[set_num] += intersection1 * (num_kmers_in_q / kmers_to_check2)
+                                else:
+                                    cands[set_num] += intersection1 * (num_kmers_in_q / kmers_to_check2)  /  ((len(query_seqs[qseq]) - K + 1)  + set_to_num_kmers[set_num]/ len(set_to_seqs[set_num]))
+                                    #print(qseq, set_num, (len(query_seqs[qseq]) - K + 1), set_to_num_kmers[set_num], len(set_to_seqs[set_num]),  (len(query_seqs[qseq]) - K + 1) / kmers_to_check2,  ((len(query_seqs[qseq]) - K + 1)  + set_to_num_kmers[set_num]/ len(set_to_seqs[set_num])), ((len(query_seqs[qseq]) - K + 1) / kmers_to_check2)  /  ((len(query_seqs[qseq]) - K + 1)  + set_to_num_kmers[set_num]/ len(set_to_seqs[set_num])))
+                            cands_sorted = sorted(cands.items(), key = lambda kv: kv[1], reverse=True)   
+                            new_cands = {}
+                            for i1 in range(max(int(len(cands_sorted)/2), top_sets_to_check)):
+                                new_cands[cands_sorted[i1][0]] = cands_sorted[i1][1]
+                            #print(qseq, rnd, cands)
+                            #print(" ")
+                            cands = new_cands
+                
+                    # for rnd in range(rounds):
+                    #     if len(cands) > top_sets_to_check:
+                    #         kmers_to_check2 = min(kmers_to_check, len(qseq_to_kmers[qseq]))
+                    #         qseq_to_kmers_sample = random.sample(qseq_to_kmers[qseq].keys(), kmers_to_check2)
+                    #         for set_num in cands:
+                    #             intersection1 = 0
+                    #             for i1 in range(kmers_to_check2):
+                    #                 #kmer1 = qseq_to_kmers_sorted[i1][0]
+                    #                 kmer1 = qseq_to_kmers_sample[i1]
+                    #                 if kmer1 in set_to_kmers[set_num]:
+                    #                     intersection1 += min(set_to_kmers[set_num][kmer1] / len(set_to_seqs[set_num]), qseq_to_kmers[qseq][kmer1])
+                    #             cands[set_num] += intersection1
+                    #         cands_sorted = sorted(cands.items(), key = lambda kv: kv[1], reverse=True)   
+                    #         new_cands = {}
+                    #         for i1 in range(max(int(len(cands_sorted)/2), top_sets_to_check)):
+                    #             new_cands[cands_sorted[i1][0]] = cands_sorted[i1][1]
+                    #         cands = new_cands
+                            
+                        
+                    qseq_cands[qseq] = cands_sorted            
+                    
+                    
+                    query_set_comparison[qseq] = {}
+                    #for set_num in range(num_sets):
+                    for ts in range(top_sets_to_check):  
+                        set_num = qseq_cands[qseq][ts][0]  
+                        
+                        intersection = {}
+                        qseq_minus_set = {}
+                        set_minus_qseq = {}
+                        total_in_qseq = 0
+                        
+                        total_in_set = 0
+                        for kmer in set(set_to_kmers[set_num].keys()).union(set(qseq_to_kmers[qseq].keys())):
+                            if kmer in set_to_kmers[set_num] and kmer in qseq_to_kmers[qseq]:
+                                s_norm = set_to_kmers[set_num][kmer]/len(set_to_seqs[set_num])
+                                q_norm = qseq_to_kmers[qseq][kmer]
+                                intersection[kmer] = min(s_norm, q_norm)
+                                if s_norm > q_norm:
+                                    set_minus_qseq[kmer] = s_norm - q_norm
+                                elif q_norm > s_norm:
+                                    qseq_minus_set[kmer] = q_norm - s_norm
+                                total_in_qseq += q_norm
+                                total_in_set += s_norm
+                            
+                            elif kmer in set_to_kmers[set_num]:
+                                s_norm = set_to_kmers[set_num][kmer]/len(set_to_seqs[set_num])
+                                set_minus_qseq[kmer] = s_norm 
+                                total_in_set += s_norm
                                 
-                    total_in_union = total_in_qseq + total_in_set
-                    total_in_intersection =  sum([intersection[kmer] for kmer in intersection])
+                            elif kmer in qseq_to_kmers[qseq]:
+                                q_norm = qseq_to_kmers[qseq][kmer]
+                                qseq_minus_set[kmer] = q_norm
+                                total_in_qseq += q_norm
+                                    
+                        total_in_union = total_in_qseq + total_in_set
+                        total_in_intersection =  sum([intersection[kmer] for kmer in intersection])
+                        
+                        #query_set_comparison_data[qseq][set_num] = [intersection, qseq_minus_set, set_minus_qseq] 
+                        
+                        query_set_comparison[qseq][set_num] = [total_in_union, total_in_intersection, total_in_intersection/total_in_union]
+               
+                
+                else:
+                    query_set_comparison[qseq] = {}
                     
-                    #query_set_comparison_data[qseq][set_num] = [intersection, qseq_minus_set, set_minus_qseq] 
-                    
-                    query_set_comparison[qseq][set_num] = [total_in_union, total_in_intersection, total_in_intersection/total_in_union]
+                    for set_num in range(num_sets):
+                        
+                        intersection = {}
+                        qseq_minus_set = {}
+                        set_minus_qseq = {}
+                        total_in_qseq = 0
+                        
+                        total_in_set = 0
+                        for kmer in set(set_to_kmers[set_num].keys()).union(set(qseq_to_kmers[qseq].keys())):
+                            if kmer in set_to_kmers[set_num] and kmer in qseq_to_kmers[qseq]:
+                                s_norm = set_to_kmers[set_num][kmer]/len(set_to_seqs[set_num])
+                                q_norm = qseq_to_kmers[qseq][kmer]
+                                intersection[kmer] = min(s_norm, q_norm)
+                                if s_norm > q_norm:
+                                    set_minus_qseq[kmer] = s_norm - q_norm
+                                elif q_norm > s_norm:
+                                    qseq_minus_set[kmer] = q_norm - s_norm
+                                total_in_qseq += q_norm
+                                total_in_set += s_norm
+                            
+                            elif kmer in set_to_kmers[set_num]:
+                                s_norm = set_to_kmers[set_num][kmer]/len(set_to_seqs[set_num])
+                                set_minus_qseq[kmer] = s_norm 
+                                total_in_set += s_norm
+                                
+                            elif kmer in qseq_to_kmers[qseq]:
+                                q_norm = qseq_to_kmers[qseq][kmer]
+                                qseq_minus_set[kmer] = q_norm
+                                total_in_qseq += q_norm
+                                    
+                        total_in_union = total_in_qseq + total_in_set
+                        total_in_intersection =  sum([intersection[kmer] for kmer in intersection])
+                        
+                        #query_set_comparison_data[qseq][set_num] = [intersection, qseq_minus_set, set_minus_qseq] 
+                        
+                        query_set_comparison[qseq][set_num] = [total_in_union, total_in_intersection, total_in_intersection/total_in_union]
 
                 
         query_assignment = {}
@@ -360,16 +421,23 @@ class JoinSearchJobs(Join):
         backbone_seqs.degap()
         
         seqs = {}
+        avg_frag_len = 0
         for seq in fragments:
             seqs[seq] = fragments[seq]
+            avg_frag_len += len(fragments[seq])
         for seq in backbone_seqs:
             seqs[seq] = backbone_seqs[seq]
-        
+        avg_frag_len = avg_frag_len / len(fragments)
         
         set_to_seqs = {}
         align_problems = []
         #K = 10  #4
         K = options().kmer_size
+        
+        use_fraction_batch = options().use_fraction_batch
+        batch_size_fraction = options().batch_size_fraction
+        min_batch_size = options().min_batch_size
+        
         kmers_to_check = options().kmers_to_check
         top_sets_to_check = options().top_sets_to_check
         rounds = options().sample_rounds
@@ -377,8 +445,10 @@ class JoinSearchJobs(Join):
         exact = options().exact
         choose_K = options().choose_K
         Ks_to_check = [int(i) for i in options().Ks_to_check.split(",")]
-        seqs_unmatched_thresh = options().seqs_unmatched_thresh
+        
 
+        # if use_fraction_batch:
+        #     kmers_to_check = max(min_batch_size, np.ceil(batch_size_fraction*avg_frag_len))
             
         
         
@@ -406,68 +476,114 @@ class JoinSearchJobs(Join):
         
         
                 
-        if choose_K:
-            bestK = None
-            Ks_to_check.sort(reverse = True)
-            for i in range(len(Ks_to_check)):
-                K1 = Ks_to_check[i]
-                if i < len(Ks_to_check) - 1:
-                    backbone_to_kmers = {}
-                    for set_num in range(num_sets):
-                        for seq_ID in set_to_seqs[set_num]:
-                            seq = seqs[seq_ID]
-                            for i in range(0, len(seq) - K1 + 1):
-                                backbone_to_kmers[seq[i:i+K1]] = True 
+        # if choose_K:
+        #     bestK = None
+        #     Ks_to_check.sort(reverse = True)
+        #     for i in range(len(Ks_to_check)):
+        #         K1 = Ks_to_check[i]
+        #         if i < len(Ks_to_check) - 1:
+        #             backbone_to_kmers = {}
+        #             for set_num in range(num_sets):
+        #                 for seq_ID in set_to_seqs[set_num]:
+        #                     seq = seqs[seq_ID]
+        #                     for j in range(0, len(seq) - K1 + 1):
+        #                         backbone_to_kmers[seq[j:j+K1]] = True 
     
-                    num_unmatched = 0
-                    for qseq in fragment_keys:
-                        qseq_seq = query_seqs[qseq]
-                        match1 = False
-                        for i in range(0, len(qseq_seq) - K1 + 1):
-                            if qseq_seq[i:i+K1] in backbone_to_kmers:
-                                match1 = True
-                                break
-                        if match1 == False:
-                            num_unmatched += 1
-                    print("K = ", K1, num_unmatched / len(query_seqs) )
-                    if num_unmatched / len(query_seqs) < seqs_unmatched_thresh:
-                        bestK = K1
-                        break
-                else:
-                    bestK = K1
-            K = bestK
+        #             num_unmatched = 0
+        #             for qseq in fragment_keys:
+        #                 qseq_seq = query_seqs[qseq]
+        #                 match1 = False
+        #                 for j in range(0, len(qseq_seq) - K1 + 1):
+        #                     if qseq_seq[j:j+K1] in backbone_to_kmers:
+        #                         match1 = True
+        #                         break
+        #                 if match1 == False:
+        #                     num_unmatched += 1
+        #             print("K = ", K1, num_unmatched / len(query_seqs) )
+        #             if num_unmatched / len(query_seqs) < seqs_unmatched_thresh:
+        #                 bestK = K1
+        #                 break
+        #         else:
+        #             bestK = K1
+        #     K = bestK
                     
                             
-                            
-            
-        
-        
-        
-        
-        
-        
-        set_to_num_kmers = {} 
-        for set_num in range(num_sets):
-            set_to_num_kmers[set_num] = 0
-            for seq in  set_to_seqs[set_num]:
-                set_to_num_kmers[set_num] += len(seqs[seq]) - K + 1
-        
-        set_to_kmers = {}
-        for set_num in range(num_sets):
-            set_to_kmers[set_num] = {}
-            for seq_ID in set_to_seqs[set_num]:
-                seq = seqs[seq_ID]
-                for i in range(0, len(seq) - K + 1):
-                    if seq[i:i+K-1] in set_to_kmers[set_num]:
-                        set_to_kmers[set_num][seq[i:i+K]] += 1
+        K_to_set_kmers = {}
+        K_to_set_num_kmers = {}
+        Ks_used = {}
+        qseq_to_K = {}
+        K_to_qseq = {}
+        if choose_K:
+            Ks_to_check.sort(reverse = True)
+            K_to_kmers = {}
+            for K1 in Ks_to_check:
+                K_to_qseq[K1] = []
+                backbone_to_kmers = {}
+                for set_num in range(num_sets):
+                    for seq_ID in set_to_seqs[set_num]:
+                        seq = seqs[seq_ID]
+                        for j in range(0, len(seq) - K1 + 1):
+                            backbone_to_kmers[seq[j:j+K1]] = True 
+                K_to_kmers[K1] = backbone_to_kmers
+            for qseq in fragment_keys:
+                qseq_seq = query_seqs[qseq]
+                for i in range(len(Ks_to_check)):
+                    K1 = Ks_to_check[i]
+                    if i < len(Ks_to_check) - 1:
+                        match1 = False
+                        for j in range(0, len(qseq_seq) - K1 + 1):
+                            if qseq_seq[j:j+K1] in K_to_kmers[K1]:
+                                match1 = True
+                                break        
+                        if match1 == True:
+                            qseq_to_K[qseq] = K1
+                            Ks_used[K1] = True
+                            K_to_qseq[K1].append(qseq)
+                            break
                     else:
-                        set_to_kmers[set_num][seq[i:i+K]] = 1
+                        qseq_to_K[qseq] = K1
+                        Ks_used[K1] = True
+                        K_to_qseq[K1].append(qseq)
+            print("")
+            for K1 in Ks_to_check:
+                print("K = " + str(K1) + ": " + str(len(K_to_qseq[K1])))
+            print("")
+        else:
+            Ks_used[K] = True
+                        
+                        
+                        
+                        
+        for K1 in Ks_used:
+            set_to_num_kmers = {} 
+            for set_num in range(num_sets):
+                set_to_num_kmers[set_num] = 0
+                for seq in  set_to_seqs[set_num]:
+                    set_to_num_kmers[set_num] += len(seqs[seq]) - K1 + 1
+            
+            set_to_kmers = {}
+            for set_num in range(num_sets):
+                set_to_kmers[set_num] = {}
+                for seq_ID in set_to_seqs[set_num]:
+                    seq = seqs[seq_ID]
+                    for i in range(0, len(seq) - K1 + 1):
+                        if seq[i:i+K1-1] in set_to_kmers[set_num]:
+                            set_to_kmers[set_num][seq[i:i+K1]] += 1
+                        else:
+                            set_to_kmers[set_num][seq[i:i+K1]] = 1
+            
+            K_to_set_kmers[K1] = set_to_kmers
+            K_to_set_num_kmers[K1] = set_to_num_kmers
+                
+            
+            
+             
         
         for set1 in set_to_seqs:
             print(set1, len(set_to_seqs[set1].keys()))
         
 
-            
+        #print(K_to_set_kmers)
             
     
         fc_fragments = {}    
@@ -483,7 +599,9 @@ class JoinSearchJobs(Join):
             # print(fcjob)
             # print(fc_seqs)
             # print(" ")
-            fcjob.setup_problem(fc_seqs, query_seqs, set_to_seqs, set_to_kmers, set_to_num_kmers, K, kmers_to_check, top_sets_to_check, rounds, int_score, exact)
+            fcjob.setup_problem(fc_seqs, query_seqs, qseq_to_K, K_to_set_kmers, K_to_set_num_kmers, set_to_seqs, use_fraction_batch, batch_size_fraction, min_batch_size, kmers_to_check, top_sets_to_check, rounds, int_score, exact)
+            #fcjob.setup_problem(fc_seqs, query_seqs, set_to_seqs, set_to_kmers, set_to_num_kmers, K, kmers_to_check, top_sets_to_check, rounds, int_score, exact)
+        
         
         # while True:
         #     time.sleep(1)
@@ -576,8 +694,10 @@ class JoinFastSearchJobs(Join):
                     set_to_queries[best_seen].append(qseq)
                 else:
                     set_to_queries[best_seen] = [qseq]
-                     
+        
+        print("")
         print(set_to_queries)
+        print("")
         #print(align_problems)
         
         not_scored = []
@@ -599,6 +719,7 @@ class JoinFastSearchJobs(Join):
         
         for set_num in set_to_queries:
             print(set_num, ":", len(set_to_queries[set_num]))
+        print("")
 
         ''' Make sure all fragments are in at least one subproblem.
         TODO: what to do with those that are not?  For now, only output
