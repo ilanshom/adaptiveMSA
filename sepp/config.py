@@ -317,8 +317,25 @@ def _init_parser():
     otherGroup.add_argument(
         "--kmerstc", "--kmers_to_check", type=int,
         dest="kmers_to_check",
-        default=40,
-        help="how many kmers from the query secuence should be used to estimate Jaccard similarity. [default: 20]")
+        default=50,
+        help="how many kmers from the query sequence should be used to estimate J-score in each round of sequenctial halving. [default: 50]")
+    
+    otherGroup.add_argument(
+        "--usefracbatch", "--use_fraction_batch", 
+        dest="use_fraction_batch",
+        default= False,  action='store_true',
+        help="take the batch size to be the fraction of the average sequence length used as the batch size for estimating the J-score in each round of sequential halving. [default: False]")
+    otherGroup.add_argument(
+        "--batchsizefrac", "--batch_size_fraction", type=float,
+        dest="batch_size_fraction",
+        default= 0.2,
+        help="the fraction of the average sequence length used as the batch size for estimating the J-score in each round of sequential halving. [default: 0.2]")
+    otherGroup.add_argument(
+        "--minbatchsize", "--min_batch_size", type=int,
+        dest="min_batch_size",
+        default= 50,
+        help="the smallest allowed batch size for estimating the J-score in each round of sequential halving when --use_fraction_batch flag is present.  [default: 50]")
+    
     otherGroup.add_argument(
         "--setstc", "--top_sets_to_check", type=int,
         dest="top_sets_to_check",
@@ -328,7 +345,7 @@ def _init_parser():
         "--srnds", "--sample_rounds", type=int,
         dest="sample_rounds", 
         default=2,
-        help="how many times should a batch of kmers be sampled from query seqeunce and checked in top half of remaining candidate hmms. [default: 1]")
+        help="how many times should a batch of kmers be sampled from query seqeunce and checked in top half of remaining candidate hmms. [default: 2]")
     otherGroup.add_argument(
         "--iscr", "--use_intersection_score",
         dest="int_score", 
@@ -348,12 +365,12 @@ def _init_parser():
         "--Ks_to_check",
         dest="Ks_to_check", 
         default="5,10",
-        help="the K values to test when choosing K. Seperate numbers by commas without spaces e.g. 5,10 [default: 5,10]]")
+        help="the K values to test when choosing K. Seperate numbers by commas without spaces e.g. 5,10 [default: 5,9]]")
     otherGroup.add_argument(
         "--seqs_unmatched_thresh", type=float,
         dest="seqs_unmatched_thresh", 
-        default=0.1,
-        help="the smallest fraction of query sequences should be unmatched in order for algotihm to use a small K. [default: 0.1]")
+        default=0.15,
+        help="the smallest fraction of query sequences should be unmatched in order for algotihm to use a small K. [default: 0.15]")
     
     
     
