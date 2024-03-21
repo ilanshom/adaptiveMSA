@@ -1,4 +1,0 @@
-Started Thu Sep  7 00:12:40 2023
-muscle -spscore output_alignment.fasta -log output_alignment_sp_score.txt 
-File=output_alignment.fasta;SP=3.114e+04
-Finished Thu Sep  7 00:13:06 2023
