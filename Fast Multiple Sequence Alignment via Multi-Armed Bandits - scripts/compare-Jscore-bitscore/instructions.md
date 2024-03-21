@@ -1,0 +1,1 @@
+To run Upp where J-score and bitscore are output for each hmm / query sequence pair on the terminal, replace the sepp folder containing source code in sepp-code/code with the sepp folder in this directory, and reinstall the sepp.  
