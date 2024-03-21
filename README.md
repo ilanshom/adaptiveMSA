@@ -1,5 +1,6 @@
 This repository contains the code for adaptiveMSA, a modified version of UPP that uses J-score instead of bitscore, along with a multi-armed bandit adaptive approach for assigning query sequences to HMMs.
 The repository for the original UPP code is here: https://github.com/smirarab/sepp
+The scripts using this software package to obtain the results in the paper "Fast Multiple Sequence Alignment via Multi-Armed Bandits" are given in the folder "Fast Multiple Sequence Alignment via Multi-Armed Bandits - scripts".
 
 ## Installation
 
